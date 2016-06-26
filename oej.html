@@ -1,0 +1,1480 @@
+<html>
+<head>
+
+<style type="text/css">
+#cards td {
+	border: 1px solid black;
+	width: 100px;
+	height: 200px;
+	text-align: center;
+	font-size: 200%;
+}
+#cards td.held {
+	background-color: orange;
+}
+</style>
+
+</head>
+<body>
+
+<table id="hand" border="0" cellspacing="40">
+	<tr id="cards">
+		<td data-card="0"></td>
+		<td data-card="1"></td>
+		<td data-card="2"></td>
+		<td data-card="3"></td>
+		<td data-card="4"></td>
+	</tr>
+	<tr>
+		<td colspan="5">
+			<button id="draw">Draw</button>
+			<span id="credits"></span>
+			<span id="result"></span>
+		</td>
+	</tr>
+	<tr>
+		<td colspan="5">
+			<button id="besthold">Best Holds</button>
+			<span id="besthold_text"></span>
+		</td>
+	</tr>
+</table>
+
+
+<script id="worker1" type="javascript/worker">
+// This script won't be parsed by JS engines because its type is javascript/worker.
+function bh(holds) {
+	return totals;
+}
+
+self.onmessage = function(e) {
+	console.log(e);
+	//var totals = bh(e.data);
+	self.postMessage(totals);
+};
+// Rest of your worker code goes here.
+</script>
+
+
+<script type="text/javascript">
+
+function PRNG(size) {
+	this.position = 0;
+	this.size = size || 10;
+	this.randomValues = new Uint32Array(this.size);
+	this.maxRange = Math.pow(2, this.randomValues.BYTES_PER_ELEMENT * 8);
+	this.generate();
+}
+
+PRNG.prototype.generate = function () {
+	window.crypto.getRandomValues(this.randomValues);
+	this.position = 0;
+};
+
+PRNG.prototype.random = function (min, max) {
+	var range = max - min + 1;
+	var rand = null;
+
+	while (rand === null) {
+		if (this.position >= this.randomValues.length) {
+			this.generate();
+		}
+
+		rand = Math.floor((this.randomValues[this.position++] / this.maxRange) * range) + min;
+	}
+
+	return rand;
+};
+
+function Card(rank, suit) {
+	this.rank = rank;
+	this.suit = suit;
+}
+
+Card.prototype.isEqual = function (card) {
+	return (this.rank == card.rank || this.suit == card.suit);
+};
+
+Card.prototype.toString = function () {
+	return this.rank + this.suit;
+};
+
+Card.prototype.toHTML = function () {
+	var str = '<span style="' + (this.suit == 'H' || this.suit == 'D' ? 'color: red' : '') + '">';
+
+	// if (this.rank == 'J' && (this.suit == 'S' || this.suit == 'H')) {
+	// 	str += "WILD<br/>";
+	// }
+
+	str += this.rank;
+
+	if (this.suit == "H") {
+		str += "&hearts;";
+	}
+	else if (this.suit == "S") {
+		str += "&spades;"
+	}
+	else if (this.suit == "C") {
+		str += "&clubs;";
+	}
+	else if (this.suit == "D") {
+		str += "&diams;";
+	}
+
+	str += '</span>';
+
+	return str;
+};
+
+function Deck() {
+	var ranks = [ "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K" ];
+	var suits = [ "S" ,"C", "D", "H" ];
+	var self = this;
+
+	self.prng = new PRNG();
+	self.cards = [];
+	self.position = 0;
+
+	ranks.forEach(function (rank) {
+		suits.forEach(function (suit) {
+			self.cards.push(new Card(rank, suit));
+		});
+	});
+
+	self.shuffle();
+}
+
+Deck.prototype.reset = function () {
+	this.position = 0;
+};
+
+Deck.prototype.shuffle = function () {
+	return;
+}
+
+// Deck.prototype.shuffle = function () {
+// 	var size = this.cards.length;
+
+// 	for (var idx = 0; idx < size; idx++) {
+// 		var rand = this.prng.random(0, size-1);
+// 		var tmp = this.cards[idx];
+
+// 		this.cards[idx] = this.cards[rand];
+// 		this.cards[rand] = tmp;
+// 	}
+
+// 	this.position = 0;
+// }
+
+Deck.prototype.get = function (rank, suit) {
+	if (arguments.length == 1) {
+		suit = rank.substring(rank.length-1, rank.length);
+		rank = rank.substring(0, rank.length-1);
+	}
+
+	for (var idx = 0; idx < this.cards.length; idx++) {
+		if (this.cards[idx].rank == rank && this.cards[idx].suit == suit) {
+			return this.cards[idx];
+		}
+	}
+};
+// KD,2S,4C,JH,2H
+Deck.prototype.getHand = function (str) {
+	var self = this;
+	var cards = str.split(',').map(function (item) {
+		return self.get(item.trim());
+	});
+	return new Hand(cards);
+};
+
+Deck.prototype.dealCard = function () {
+	// not how they actually work
+	// var card = this.cards[this.position++];
+
+	// if (this.position >= this.cards.length) {
+	// 	this.shuffle();
+	// }
+
+	// continous shuffle to prevent counting
+	var rand = this.prng.random(0, this.cards.length-1);
+	return this.cards[rand];
+};
+
+Deck.prototype.deal = function (num) {
+	// this.position += num;
+	var cards = [];
+	var idx = 0;
+
+	while (idx < num) {
+		var card = this.dealCard();
+
+		if (cards.indexOf(card) == -1) {
+			cards.push(card);
+			idx++;
+		}
+	}
+
+	return cards;
+};
+
+Deck.prototype.dealInto = function (hand) {
+	for (var idx = 0; idx < hand.maxcards; idx++) {
+		if (hand.held.indexOf(idx) != -1) {
+			continue; // held
+		}
+
+		var card = this.dealCard();
+
+		while (hand.cards.indexOf(card) != -1) {
+			// console.log('redeal:', card);
+			card = this.dealCard();
+		}
+
+		hand.cards[idx] = card;
+	}
+};
+
+function Hand(cards) {
+	this.cards = cards || [];
+	this.held = [];
+	this.maxcards = 5;
+}
+
+Hand.prototype.toString = function () {
+	return this.cards.map(function (card) {
+		return card.toString();
+	}).join(', ');
+};
+
+Hand.prototype.hold = function (pos) {
+	var idx = this.held.indexOf(pos);
+
+	if (idx == -1) {
+		this.held.push(pos);
+	}
+	else {
+		this.held.splice(idx, 1);
+	}
+};
+
+Hand.prototype.getHolds = function (mask) {
+	var cards = [];
+
+	for (var c = 0; c < this.cards.length; c++) {
+		if (mask & 1<<c) {
+			cards.push(this.cards[c]);
+		}
+	}
+
+	return cards;
+};
+
+Hand.prototype.isValid = function () {
+	return (
+		this.cards.length == 5 &&
+		this.cards[0] != this.cards[1] &&
+		this.cards[0] != this.cards[2] &&
+		this.cards[0] != this.cards[3] &&
+		this.cards[0] != this.cards[4] &&
+		this.cards[1] != this.cards[2] &&
+		this.cards[1] != this.cards[3] &&
+		this.cards[1] != this.cards[4] &&
+		this.cards[2] != this.cards[3] &&
+		this.cards[2] != this.cards[4] &&
+		this.cards[3] != this.cards[4]
+	);
+};
+
+function OEJScoring() {
+	// this.deck = deck;
+	this.paytable_job = {
+		'natural_royal': 250,
+		'straight_flush': 50,
+		'four_kind': 25,
+		'full_house': 8,
+		'flush': 5,
+		'straight': 4,
+		'three_kind': 3,
+		'two_pair': 2,
+		'jacks_better': 1
+	};
+
+	this.paytable_oej = {
+		//'natural_royal': 800,
+		//'wild_royal': 200,
+		'natural_royal': 800, // 250, // 4000 - 5 CRED
+		'wild_royal': 150,
+		'five_kind': 75,
+		//'straight_flush': 50,
+		'straight_flush': 45,
+		'four_kind': 15,
+		'full_house': 5,
+		'flush': 3,
+		'straight': 2,
+		'three_kind': 1,
+		'two_pair': 1
+	};
+
+	this.paytable = this.paytable_oej;
+	this.classify = this.classify_oej;
+	this.iswild = this.iswild_oej;
+
+
+	//this.paytable = this.paytable_job;
+	//this.classify = this.classify_job;
+	//this.iswild = this.iswild_job;
+
+
+	this.rankorder = [ "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A" ];
+
+}
+// var a = new Hand([new Card('J','S'),new Card('6','H'), new Card('7','C'), new Card('5','H'), new Card('9','D')]); asdf.scoring.totals(a);
+// var a = new Hand([new Card('J','S'),new Card('A','H'), new Card('K','C'), new Card('Q','H'), new Card('J','D')]); asdf.scoring.totals(a);
+// var a = new Hand([new Card('K','D'),new Card('A','S'), new Card('5','H'), new Card('5','D'), new Card('A','D')]); asdf.scoring.totals(a);
+// var a = new Hand([new Card('J','S'),new Card('Q','D'), new Card('3','D'), new Card('8','C'), new Card('3','H')]); asdf.scoring.totals(a);
+// var a = new Hand([new Card('2','D'),new Card('10','C'), new Card('3','H'), new Card('7','C'), new Card('J','S')]); asdf.scoring.totals(a);
+// var a = new Hand([new Card('9','D'),new Card('J','D'), new Card('4','S'), new Card('9','H'), new Card('J','H')]); asdf.scoring.totals(a);
+// var a = new Hand([new Card('J','C'),new Card('9','S'), new Card('3','S'), new Card('9','H'), new Card('J','S')]); asdf.scoring.totals(a);
+
+OEJScoring.prototype.totals = function (hand) {
+	var options = { pairs: 0, kind: 0, flush: 0, nstraight: 0, wstraight: 0, royals: 0, wilds: 0, ranks: 0, suits: 0, job: 0 };
+	var pair1, pair2;
+
+	options.ranks = hand.cards.length;
+	options.suits = hand.cards.length;
+
+	for (var a = 0; a < hand.cards.length; a++) {
+		var kind = 0;
+		var flush = 0;
+		var distinctrank = true;
+		var distinctsuit = true;
+		var wilda = this.iswild(hand.cards[a]);
+
+		for (var b = 0; b < hand.cards.length; b++) {
+			var wildb = this.iswild(hand.cards[b]);
+
+			// if (wildb || hand.cards[a].suit == hand.cards[b].suit) {
+			if (!wildb && hand.cards[a].rank == hand.cards[b].rank) {
+				kind++;
+			}
+
+			// if (hand.cards[a].suit == hand.cards[b].suit) {
+			// if (wildb || hand.cards[a].suit == hand.cards[b].suit) {
+			if (!wildb && hand.cards[a].suit == hand.cards[b].suit) {
+				flush++;
+			}
+
+			if (a < b && hand.cards[a].rank == hand.cards[b].rank && !wildb) {
+				distinctrank = false;
+			}
+
+			if (a < b && hand.cards[a].suit == hand.cards[b].suit && !wildb) {
+				distinctsuit = false;
+			}
+		}
+
+		if (kind > options.kind) {
+			options.kind = kind;
+		}
+
+		if (flush > options.flush) {
+			options.flush = flush;
+		}
+
+		if (!distinctrank || wilda) {
+			options.ranks--;
+		}
+
+		if (!distinctsuit || wilda) {
+			options.suits--;
+		}
+
+		if (!wilda && (hand.cards[a].rank == "A" || hand.cards[a].rank == "J" || hand.cards[a].rank == "Q" || hand.cards[a].rank == "K")) {
+			options.royals++;
+		}
+
+		if (wilda) {
+			options.wilds++;
+		}
+
+		if (!wilda && kind >= 2) {
+			if (!pair1) {
+				pair1 = hand.cards[a].rank;
+			}
+			else if (pair1 != hand.cards[a].rank && !pair2) {
+				pair2 = hand.cards[a].rank;
+			}
+		}
+
+		if (kind >= 2 && (hand.cards[a].rank == "A" || hand.cards[a].rank == "J" || hand.cards[a].rank == "Q" || hand.cards[a].rank == "K")) {
+			options.job++;
+		}
+	}
+
+	if (pair1) {
+		options.pairs++;
+	}
+
+	if (pair2) {
+		options.pairs++;
+	}
+
+	if (options.wilds > 0) {
+		options.kind += options.wilds;
+		options.flush += options.wilds;
+		options.royals += options.wilds;
+
+		if (options.pairs < 2) {
+			options.pairs += options.wilds;
+		}
+	}
+
+
+	var nstraight = 0;
+	var wstraight = 0;
+	var wildsleft = options.wilds;
+
+	for (var a = 0; a < this.rankorder.length; a++) {
+		var nfound = false;
+		var wfound = false;
+
+		for (var b = 0; b < hand.cards.length; b++) {
+			var wildb = this.iswild(hand.cards[b]);
+
+			if (!wildb && this.rankorder[a] == hand.cards[b].rank) {
+				wfound = true;
+			}
+
+			if (this.rankorder[a] == hand.cards[b].rank) {
+				nfound = true;
+			}
+		}
+
+		if (!nfound) {
+			if (nstraight > options.nstraight) {
+				options.nstraight = nstraight;
+			}
+			nstraight = 0;
+		}
+		else {
+			nstraight++;
+		}
+
+		if (!wfound && wstraight > 0 && wildsleft > 0) {
+			wfound = true;
+			wildsleft--;
+		}
+
+		if (!wfound) {
+			if (wstraight > options.wstraight) {
+				options.wstraight = wstraight;
+			}
+			wstraight = 0;
+			wildsleft = options.wilds;
+		}
+		else {
+			wstraight++;
+		}
+	}
+
+	if (nstraight > options.nstraight) {
+		options.nstraight = nstraight;
+	}
+
+	if (wstraight + wildsleft > options.wstraight) {
+		options.wstraight = wstraight + wildsleft;
+	}
+
+	return options;
+};
+
+OEJScoring.prototype.iswild_job = function (card) {
+	return false;
+};
+
+OEJScoring.prototype.iswild_oej = function (card) {
+	return card.rank == "J" && (card.suit == "H" || card.suit == "S");
+};
+
+
+OEJScoring.prototype.classify_job = function (hand) {
+	var totals = this.totals(hand);
+	var cls = null;
+
+	if (totals.royals == 4 && totals.nstraight == 5 && totals.flush == 5) {
+		cls = 'natural_royal';
+	}
+	else if (totals.nstraight == 5 && totals.flush == 5) {
+		cls = 'straight_flush';
+	}
+	else if (totals.kind == 4) {
+		cls = 'four_kind';
+	}
+	else if (totals.ranks == 2) {
+		cls = 'full_house';
+	}
+	else if (totals.flush == 5) {
+		cls = 'flush';
+	}
+	else if (totals.nstraight == 5) {
+		cls = 'straight';
+	}
+	else if (totals.kind == 3) {
+		cls = 'three_kind';
+	}
+	else if (totals.pairs == 2) {
+		cls = 'two_pair';
+	}
+	else if (totals.job > 0) {
+		cls = 'jacks_better';
+	}
+
+	return cls;
+};
+
+OEJScoring.prototype.classify_oej = function (hand) {
+	var totals = this.totals(hand);
+	var cls = null;
+
+	if (totals.royals == 4 && totals.nstraight == 5 && totals.flush == 5) {
+		cls = 'natural_royal';
+	}
+	else if (totals.royals == 4 && totals.wstraight == 5 && totals.flush == 5) {
+		cls = 'wild_royal';
+	}
+	else if (totals.kind == 5) {
+		cls = 'five_kind';
+	}
+	else if (totals.wstraight == 5 && totals.flush == 5) {
+		cls = 'straight_flush';
+	}
+	else if (totals.kind == 4) {
+		cls = 'four_kind';
+	}
+	else if (totals.ranks == 2) {
+		cls = 'full_house';
+	}
+	else if (totals.flush == 5) {
+		cls = 'flush';
+	}
+	else if (totals.wstraight == 5) {
+		cls = 'straight';
+	}
+	else if (totals.kind == 3) {
+		cls = 'three_kind';
+	}
+	else if (totals.pairs == 2) {
+		cls = 'two_pair';
+	}
+
+	return cls;
+};
+
+OEJScoring.prototype.payout = function (hand) {
+	var cls = this.classify(hand);
+	var pay = 0;
+
+	if (this.paytable[cls]) {
+		pay = this.paytable[cls];
+	}
+
+	return pay;
+};
+
+
+OEJScoring.prototype.probability = function () {
+	var cls = this.classify();
+
+if (cls.pairs == 2) {
+	cls.two_pair_prob = 1;
+}
+else if (cls.pairs == 1) {
+	var cards = this.ncr(50, 3);
+
+	var freq = this.ncr(12, 1); // 12 ways to pick a rank
+	freq *= this.ncr(4, 2); // 6 ways to pick a pair
+	freq *= this.ncr(2, 1); // 2 ways to pick a wild
+
+	freq *= this.ncr(11, 1); // 11 ways to pick a rank
+	freq *= this.ncr(4, 1); // 4 ways to pick the last card
+
+	cls.two_pair_prob = freq / cards;
+
+}
+else {
+	 // five ways for first pair and three ways for second pair
+	// cls.two_pair_prob = 5 * 1 * (5/51) * 3 * 1 * (5/49);
+	var cards = this.ncr(52, 5);
+
+	var freq = this.ncr(13, 2); // 78 ways to pick two ranks
+	freq *= this.ncr(4, 2); // 6 ways to pick a pair
+	freq *= this.ncr(4, 2); // 6 ways to pick a pair
+	freq *= this.ncr(2, 1); // 2 ways to pick a wild
+
+	freq *= this.ncr(11, 1); // 11 ways to pick the last rank
+	freq *= this.ncr(4, 1); // 4 ways to pick the last card
+
+	cls.two_pair_prob = freq / cards;
+}
+
+if (cls.kind <= 1) {
+	var cards = this.ncr(52, 5);
+
+	// cls.three_kind_prob = (5-cls.kind) * Math.pow((4-cls.kind)/(52-cls.kind), 3-cls.kind);
+	var three_freq = this.ncr(13, 1); // 13 ways to pick a rank
+	three_freq *= this.ncr(4, 3); // 4 ways to pick three cards in a rank
+	three_freq *= this.ncr(2, 1); // 2 ways to pick a wild
+
+	three_freq *= this.ncr(12, 2); // ways to pick two ranks
+	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
+	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
+
+	var four_freq = this.ncr(13, 1); // 13 ways to pick a rank
+	four_freq *= this.ncr(4, 4); // 4 ways to pick three cards in a rank
+	four_freq *= this.ncr(2, 1); // 2 ways to pick a wild
+
+	four_freq *= this.ncr(12, 1); // ways to pick two ranks
+	four_freq *= this.ncr(4, 1);  // ways to pick card from rank
+
+	cls.three_kind_prob = three_freq / cards;
+	cls.four_kind_prob = four_freq / cards;
+}
+else {
+	var cards = this.ncr(47, 5-cls.kind);
+
+	var three_freq = this.ncr(4-cls.kind, 3-cls.kind); // 4 ways to pick three cards in a rank
+
+	three_freq *= this.ncr(12, 2); // ways to pick two ranks
+	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
+	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
+	three_freq *= this.ncr(2, 1); // 2 ways to pick a wild
+
+	var four_freq = this.ncr(4-cls.kind, 4-cls.kind); // 4 ways to pick three cards in a rank
+
+	four_freq *= this.ncr(12, 1); // ways to pick two ranks
+	four_freq *= this.ncr(4, 1);  // ways to pick card from rank
+
+	cls.three_kind_prob = three_freq / cards;
+	cls.four_kind_prob = four_freq / cards;
+}
+
+	return cls;
+};
+
+
+OEJScoring.prototype.factorial = function (num) {
+	var result = num;
+
+	if (num == 0) {
+		result = 1;
+	}
+
+	while (num > 1) {
+		result *= --num;
+	}
+
+	return result;
+};
+
+OEJScoring.prototype.ncr = function (n, k) {
+	return (this.factorial(n)) / (this.factorial(k) * this.factorial(n - k));
+};
+
+
+
+function Test() {
+	this.deck = new Deck();
+	this.hand = new Hand();
+	this.scoring = new OEJScoring();
+	this.bestHolds = new BestHolds(this.scoring, true);
+	this.credits = 4000;
+	this.redraw = false;
+	this.numcards = 5;
+
+this.initialize = function () {
+	var container = document.getElementById("cards");
+	var tds = container.getElementsByTagName("td");
+	var self = this;
+
+	this.test();
+	this.shuffle();
+	this.deal();
+
+	for (var idx = 0; idx < tds.length; idx++) {
+		tds[idx].addEventListener('click', function () {
+			this.className = (this.className == 'held' ? '' : 'held');
+			var pos = parseInt(this.getAttribute('data-card'));
+			self.hand.hold(pos);
+		});
+	}
+
+
+	document.getElementById("besthold").addEventListener('click', function () {
+		var txt = document.getElementById("besthold_text");
+		txt.innerHTML = 'Calculating...';
+
+		setTimeout(function () {
+			var best = self.bestHolds.get(self.hand);
+			if (best.score > 0.2265 && best.prob > 0.1378) {
+				txt.innerHTML = (new Hand(best.cards)).toString() + ' ' + best.score + ' ' + best.prob;
+			}
+			else {
+				txt.innerHTML = "discard";
+			}
+		}, 10);
+	});
+
+	document.getElementById("draw").addEventListener('click', function () {
+		self.deal();
+	});
+};
+
+
+this.test = function () {
+	var hands = {
+
+		'natural_royal': [
+			new Hand([this.deck.get('K','C'), this.deck.get('Q','C'), this.deck.get('J','C'), this.deck.get('10','C'), this.deck.get('A','C')]),
+
+			new Hand([this.deck.get('K','S'), this.deck.get('Q','S'), this.deck.get('J','S'), this.deck.get('10','S'), this.deck.get('A','S')]),
+		],
+
+		'wild_royal': [
+			new Hand([this.deck.get('J','S'), this.deck.get('Q','C'), this.deck.get('J','C'), this.deck.get('10','C'), this.deck.get('A','C')]),
+		],
+
+		'five_kind': [
+			new Hand([this.deck.get('J','S'), this.deck.get('Q','C'), this.deck.get('Q','H'), this.deck.get('Q','D'), this.deck.get('Q','S')]),
+		],
+
+		'straight_flush': [
+			new Hand([this.deck.get('10','S'), this.deck.get('9','S'), this.deck.get('8','S'), this.deck.get('7','S'), this.deck.get('6','S')]),
+
+			new Hand([this.deck.get('10','S'), this.deck.get('9','S'), this.deck.get('J','S'), this.deck.get('7','S'), this.deck.get('6','S')]),
+		],
+
+		'four_kind': [
+			new Hand([this.deck.get('Q','S'), this.deck.get('Q','C'), this.deck.get('Q','H'), this.deck.get('Q','D'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('J','S'), this.deck.get('Q','H'), this.deck.get('Q','D'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('J','S'), this.deck.get('J','H'), this.deck.get('Q','D'), this.deck.get('3','S')]),
+		],
+
+		'full_house': [
+			new Hand([this.deck.get('Q','C'), this.deck.get('Q','S'), this.deck.get('Q','H'), this.deck.get('3','D'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('J','S'), this.deck.get('Q','H'), this.deck.get('3','D'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('J','S'), this.deck.get('Q','H'), this.deck.get('3','D'), this.deck.get('J','H')]), // better as fok
+		],
+
+		'flush': [
+			new Hand([this.deck.get('Q','C'), this.deck.get('5','C'), this.deck.get('9','C'), this.deck.get('3','C'), this.deck.get('K','C')]),
+
+			new Hand([this.deck.get('Q','C'), this.deck.get('5','C'), this.deck.get('9','C'), this.deck.get('J','S'), this.deck.get('K','C')]),
+
+			new Hand([this.deck.get('Q','C'), this.deck.get('5','C'), this.deck.get('9','C'), this.deck.get('J','S'), this.deck.get('J','H')]),
+		],
+
+		'straight': [
+			new Hand([this.deck.get('10','C'), this.deck.get('9','H'), this.deck.get('8','D'), this.deck.get('7','C'), this.deck.get('6','D')]),
+
+			new Hand([this.deck.get('10','C'), this.deck.get('9','H'), this.deck.get('J','S'), this.deck.get('7','C'), this.deck.get('6','D')]),
+
+			new Hand([this.deck.get('10','C'), this.deck.get('J','S'), this.deck.get('8','D'), this.deck.get('J','H'), this.deck.get('6','D')]),
+		],
+
+		'three_kind': [
+			new Hand([this.deck.get('Q','S'), this.deck.get('Q','C'), this.deck.get('7','C'), this.deck.get('Q','D'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('J','S'), this.deck.get('7','C'), this.deck.get('Q','D'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('J','S'), this.deck.get('J','H'), this.deck.get('7','C'), this.deck.get('3','S')]),
+		],
+
+		'two_pair': [
+			new Hand([this.deck.get('Q','S'), this.deck.get('Q','C'), this.deck.get('7','D'), this.deck.get('7','H'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('Q','C'), this.deck.get('J','S'), this.deck.get('7','H'), this.deck.get('3','S')]),
+
+			new Hand([this.deck.get('Q','S'), this.deck.get('J','H'), this.deck.get('J','S'), this.deck.get('7','H'), this.deck.get('3','S')]),
+		],
+	};
+
+	for (var name in hands) {
+		if (!hands.hasOwnProperty(name)) {
+			continue;
+		}
+
+		for (var i = 0; i < hands[name].length; i++) {
+			console.log(name, this.scoring.classify(hands[name][i]), this.scoring.totals(hands[name][i]));
+		}
+	}
+
+	var deck = new Deck();
+	var numhands = 10000;
+	var dist = {};
+
+	for (var idx = 0; idx < numhands; idx++) {
+		var cards = deck.deal(this.numcards);
+
+		for (var c = 0; c < cards.length; c++) {
+			var name = cards[c].toString();
+
+			if (!dist[name])
+				dist[name] = 0;
+
+			dist[name]++;
+		}
+	}
+
+	console.log(dist);
+};
+
+	this.shuffle = function () {
+		this.deck.shuffle();
+	};
+
+	this.deal = function () {
+		var container = document.getElementById("cards");
+		var tds = container.getElementsByTagName("td");
+		var self = this;
+
+		if (!this.redraw) {
+			this.hand.cards = this.deck.deal(this.numcards);
+			this.hand.held = [];
+			this.credits = this.credits - 1;
+
+
+			var txt = document.getElementById("besthold_text");
+			txt.innerHTML = 'Calculating...';
+
+			setTimeout(function () {
+				var best = self.bestHolds.get(self.hand);
+				txt.innerHTML = (new Hand(best.cards)).toString() + ' ' + best.score + ' ' + best.prob;
+			}, 0);
+		}
+		else {
+			this.deck.dealInto(this.hand);
+		// 	for (var idx = 0; idx < this.hand.cards.length; idx++) {
+		// 		if (this.hand.held.indexOf(idx) != -1) {
+		// 			continue; // held
+		// 		}
+
+		// 		var card = this.deck.dealCard();
+
+		// 		while (this.hand.cards.indexOf(card) != -1) {
+		// 			console.log('redeal:', card);
+		// 			card = this.deck.dealCard();
+		// 		}
+
+		// 		this.hand.cards[idx] = card;
+		// 	}
+		}
+
+console.log("hand: " + this.hand.cards);
+console.log("totals: " + JSON.stringify(this.scoring.totals(this.hand)));
+console.log("classify: " + JSON.stringify(this.scoring.classify(this.hand)));
+
+		for (var idx = 0; idx < this.hand.cards.length; idx++) {
+			tds[idx].innerHTML = this.hand.cards[idx].toHTML();
+
+			if (!this.redraw && tds[idx].className != '') {
+				tds[idx].className = '';
+			}
+		}
+
+		var result = document.getElementById("result");
+		var cls = this.scoring.classify(this.hand);
+		var tot = this.scoring.totals(this.hand);
+
+		result.innerHTML = cls + '&nbsp;' + JSON.stringify(tot);
+
+		if (this.redraw && cls) {
+			this.credits += this.scoring.paytable[cls];
+		}
+
+		this.redraw = !this.redraw;
+
+		document.getElementById("credits").innerHTML = this.credits;
+
+		return this.hand;
+	};
+};
+
+function BestHolds(scoring, verbose, numhands) {
+	this.scoring = scoring;
+	this.numhands = numhands || 5000;
+	this.numcards = 5;
+	this.verbose = verbose;
+}
+
+BestHolds.prototype.get = function (hand) {
+	var perms = Math.pow(2, this.numcards);
+
+var max_prob_score = 0.0;
+var max_prob_prob = 0.0
+var max_prob_cards = [];
+var max_prob_totals = null;
+
+var discard_score = 0.0;
+var discard_prob = 0.0;
+
+	for (var p = 0; p < perms; p++) {
+		var cards = [];
+
+		for (var c = 0; c < this.numcards; c++) {
+			if (p & 1<<c) {
+				cards.push(hand.cards[c]);
+			}
+		}
+
+		var totals = this.fastbh(cards);
+
+var prob_score = 0.0
+var prob_prob = 0.0;
+
+for (var prop in totals) {
+if (!totals.hasOwnProperty(prop) || prop == 'none' || prop == 'total') {
+	continue;
+}
+
+prob_score += this.scoring.paytable[prop] * totals[prop];
+prob_prob += totals[prop];
+}
+
+prob_score = prob_score / totals['total'];
+prob_prob = prob_prob / totals['total'];
+
+if (p == 0) {
+discard_score = prob_score;
+discard_prob = prob_prob;
+}
+
+// if (prob_score > max_prob_score && prob_score > 0.2265 && prob_prob > 0.1378) {
+if (prob_score > max_prob_score && prob_score > discard_score && prob_prob > discard_prob) {
+// if (prob_prob > max_prob_prob) {
+max_prob_score = prob_score;
+max_prob_prob = prob_prob;
+max_prob_cards = cards;
+max_prob_totals = totals;
+}
+
+if (this.verbose) {
+	console.log('hold', (!totals.none ? 'win' : ''), (new Hand(cards)).toString(), prob_score, prob_prob, totals);
+}
+
+	}
+
+	// if (max_prob_prob < .37) {
+	// 	max_prob_cards = [];
+	// 	max_prob_score = 0;
+	// 	max_prog_prob = .37;
+	// }
+
+	if (this.verbose && max_prob_totals) {
+		console.log('max', (!max_prob_totals.none ? 'win' : ''), (new Hand(max_prob_cards)).toString(), max_prob_score, max_prob_prob, max_prob_totals);
+	}
+
+	return { cards: max_prob_cards, score: max_prob_score, prob: max_prob_prob };
+};
+
+BestHolds.prototype.fastbh = function (holds) {
+	var remaining = this.numcards - holds.length;
+	var totals = {};
+	var deck = new Deck();
+
+	for (var nh = 0; nh < this.numhands; nh++) {
+		var hand = new Hand(holds.slice());
+
+		for (var c = hand.cards.length; c < this.numcards; ) {
+			var card = deck.dealCard();
+
+			if (hand.cards.indexOf(card) == -1) {
+				hand.cards.push(card);
+				c++;
+			}
+		}
+
+		var cls = this.scoring.classify(hand) || 'none';
+		totals[cls] = (totals[cls] || 0) + 1;
+		totals['total'] = (totals['total'] || 0) + 1;
+
+		deck.shuffle();
+	}
+
+	return totals;
+};
+
+BestHolds.prototype.bh = function (holds) {
+	var remaining = this.numcards - holds.length;
+	var csize = holds.length;
+	var hand = new Hand(holds.slice());
+	var dsize = this.deck.cards.length;
+	var totals = {};
+	var combs = 0;
+
+	for (var a = 0; a < dsize; a++) {
+		if (csize <= 0) {
+			hand.cards[0] = this.deck.cards[a];
+		}
+
+		for (var b = 0; b < dsize; b++) {
+			if (csize <= 1) {
+				hand.cards[1] = this.deck.cards[b];
+			}
+
+			for (var c = 0; c < dsize; c++) {
+				if (csize <= 2) {
+					hand.cards[2] = this.deck.cards[c];
+				}
+
+				for (var d = 0; d < dsize; d++) {
+					if (csize <= 3) {
+						hand.cards[3] = this.deck.cards[d];
+					}
+
+					for (var e = 0; e < dsize; e++) {
+						if (csize <= 4) {
+							hand.cards[4] = this.deck.cards[e];
+						}
+
+						if (hand.isValid()) {
+							var cls = this.scoring.classify(hand) || 'none';
+							totals[cls] = (totals[cls] || 0) + 1;
+							totals['total'] = (totals['total'] || 0) + 1;
+						}
+
+						if (csize > 4) {
+							break;
+						}
+					}
+
+					if (csize > 3) {
+						break;
+					}
+				}
+
+				if (csize > 2) {
+					break;
+				}
+			}
+
+			if (csize > 1) {
+				break;
+			}
+		}
+
+		if (csize > 0) {
+			break;
+		}
+	}
+
+	return totals;
+};
+
+
+function Genetic() {
+	this.mutationRate = 0.01;
+	this.totalPopulation = 500;
+	this.population = []; // DNA[]
+	this.matingPool = []; // ArrayList<DNA> matingPool
+
+	this.deck = new Deck();
+	this.scoring = new OEJScoring();
+	this.credits = 150;
+	this.numcards = 5;
+	this.hands = [];
+	this.numhands = 100;
+
+	for (var idx = 0; idx < this.numhands; idx++) {
+		var cards = this.deck.deal(this.numcards);
+		this.hands.push(new Hand(cards));
+	}
+
+	for (var i = 0; i < this.totalPopulation; i++) {
+		this.population[i] = new DNA(this);
+	}
+}
+
+
+Genetic.prototype.best = function () {
+	var pop = null;
+	var fit = 0.0;
+
+	for (var i = 0; i < this.population.length; i++) {
+		var f = this.population[i].fitness();
+		if (f > fit) {
+			pop = this.population[i];
+			fit = f;
+		}
+	}
+
+	return pop;
+};
+
+Genetic.prototype.loop = function (loops) {
+	loops = loops || 100;
+
+	for (var i = 0; i < loops; i++) {
+		this.run();
+		this.deck.shuffle();
+		console.log('gen', i, this.best().fitness());
+	}
+
+	var best = this.best();
+
+	for (var i = 0; i < this.hands.length; i++) {
+		var hand = this.hands[i];
+		var holds = new Hand(this.hands[i].getHolds(best.genes[i]));
+		var fit = best.geneFitness[i];
+		if (fit > 0) {
+			console.log('result: ', hand.toString(), ': ', holds.toString(), ': ', fit);
+		}
+	}
+
+	console.log('fitness: ', best.fitness());
+};
+
+Genetic.prototype.run = function () {
+
+	this.matingPool = []; // new ArrayList<DNA>();
+
+	var minfit = this.population[0].fitness();
+	var maxfit = this.population[0].fitness();
+
+	for (var i = 0; i < this.population.length; i++) {
+		minfit = Math.min(maxfit, this.population[i].fitness());
+		maxfit = Math.max(maxfit, this.population[i].fitness());
+	}
+
+	for (var i = 0; i < this.population.length; i++) {
+		var n = Math.max(Math.floor(100 * (this.population[i].fitness() - minfit) / (maxfit - minfit)), 1);
+		// var n = Math.floor(this.population[i].fitness() * 100);
+
+		for (var j = 0; j < n; j++) {
+			this.matingPool.push(this.population[i]);
+		}
+	}
+
+	for (var i = 0; i < this.population.length; i++) {
+		var a = Math.floor(Math.random() * this.matingPool.length);
+		var b = Math.floor(Math.random() * this.matingPool.length);
+		var partnerA = this.matingPool[a];
+		var partnerB = this.matingPool[b];
+		var child = partnerA.crossover(partnerB);
+		child.mutate(this.mutationRate);
+		this.population[i] = child;
+	}
+
+	// this.deck.shuffle();
+
+	// local maxima!
+
+//  	var pop = this.best();
+// console.log('maxfit: ', pop.fitness());
+
+// 	for (var i = 0; i < this.population.length; i++) {
+// 		var child = pop.crossover(pop);
+// 		child.mutate(this.mutationRate);
+// 		this.population[i] = child;
+// 	}
+};
+
+function DNA(obj) {
+	this.genes = []; // char[] genes;
+	this.obj = obj;
+	this.geneFitness = [];
+
+	// Create DNA randomly
+	this.mutate(1);
+}
+
+DNA.prototype.fitness = function () {
+	if (this.fitnessVal == -1.0) {
+		var credits = this.genes.length;
+
+		for (var idx = 0; idx < this.obj.hands.length; idx++) {
+			var hand = new Hand();
+			hand.cards = this.obj.hands[idx].getHolds(this.genes[idx]);
+			this.obj.deck.dealInto(hand);
+
+			var pay = this.obj.scoring.payout(hand);
+
+			this.geneFitness[idx] = (pay > 0 ? 1 : 0);
+			credits += this.geneFitness[idx] - 1;
+		}
+
+		this.fitnessVal = credits / this.genes.length;
+	}
+
+	return this.fitnessVal;
+};
+
+DNA.prototype.crossover = function (partner) {
+	var child = new DNA(this.obj);
+	var midpoint = Math.floor(Math.random() * this.genes.length);
+
+	for (var i = 0; i < this.genes.length; i++) {
+		if (i > midpoint) {
+			child.genes[i] = this.genes[i];
+		}
+		else {
+			child.genes[i] = partner.genes[i];
+		}
+	}
+
+	return child;
+};
+
+DNA.prototype.mutate = function (mutationRate) {
+	var numperms = Math.pow(2, this.obj.numcards);
+
+	this.fitnessVal = -1.0;
+
+	for (var i = 0; i < this.obj.hands.length; i++) {
+		if (Math.random() < mutationRate) {
+			this.genes[i] = Math.floor(Math.random() * numperms); // (char) random(32,128);
+		}
+	}
+};
+
+function startWorker(obj) {
+	var blob = new Blob([
+		document.querySelector('#worker1').textContent
+	], { type: "text/javascript" })
+
+	// Note: window.webkitURL.createObjectURL() in Chrome 10+.
+	var worker = new Worker(window.URL.createObjectURL(blob));
+
+	var pm = new Promise(function (resolve, reject) {
+		worker.onmessage = function (e) {
+			resolve(e.data);
+		}
+	});
+
+	worker.postMessage(obj);
+
+	return pm;
+}
+
+
+function Strategy() {
+	this.deck = new Deck();
+	this.hand = new Hand();
+	this.scoring = new OEJScoring();
+	this.bestHolds = new BestHolds(this.scoring, false);
+	this.credits = 4000;
+	this.redraw = false;
+	this.numcards = 5;
+
+	this.deck.shuffle();
+}
+
+Strategy.prototype.deal = function () {
+	if (!this.redraw) {
+		this.hand.cards = this.deck.deal(this.numcards);
+		this.hand.held = [];
+		this.credits = this.credits - 1;
+	}
+	else {
+		var prev = this.hand.cards.slice();
+		this.deck.dealInto(this.hand);
+	}
+
+	var cls = this.scoring.classify(this.hand);
+	var tot = this.scoring.totals(this.hand);
+
+	if (this.redraw && cls) {
+		this.credits += this.scoring.paytable[cls];
+	}
+
+	if (this.redraw) {
+		console.log('score:', this.credits, cls, tot, this.hand.held, (new Hand(prev)).toString(), '=', this.hand.toString());
+	}
+
+	this.redraw = !this.redraw;
+
+	return cls;
+};
+
+Strategy.prototype.run = function (times) {
+	times = times || 1;
+	var wins = 0;
+
+	for (var t = 0; t < times; t++) {
+		this.deal();
+
+		var tot = this.scoring.totals(this.hand);
+		var best = this.bestHolds.get(this.hand);
+
+		for (var idx = 0; idx < best.cards.length; idx++) {
+			var pos = this.hand.cards.indexOf(best.cards[idx]);
+			this.hand.held.push(pos);
+		}
+
+		var cls = this.deal();
+
+		if (cls == "natural_royal" || cls == "wild_royal") {
+			console.log("ROYAL AFTER " + t + " TIMES");
+			return;
+		}
+
+		if (cls) {
+			wins++;
+		}
+	}
+
+	console.log('win percentage: ' + (100.0*wins/times) + '%');
+};
+
+
+var strat = new Strategy();
+var gen = new Genetic();
+
+var asdf;
+
+window.addEventListener("load", function () {
+	asdf = new Test();
+	asdf.initialize();
+});
+
+// JC,JH,JS,7C,10D
+
+/**
+
+4 straight + wild
+
+2 royal suited + wild > 3 royal + wild > pair
+
+wild > 3 straight + wild
+5.1054 1      1 kind + 2 wild (JS, JH, QC)
+3.0595 1      2 kind + 1 wild (JH, 7D, 7H)
+3      1      flush (8D, 4D, 6D, 3D, 9D)
+2      1      3 straight + 2 wild
+1.5578 0.3877 2 flush + wild sequence?
+1.5    1      2 pair (10C, 6H, 10H, 6C)
+1.4965 0.4812 2 straight + wild (5C, JS, 4C)
+1.3299 0.3911 2 straight flush + wild (KD, 9D, JH)
+1.3086 0.4039 2 royal flush + wild (KH, JH, 10H)
+0.9761 0.4047 2 flush + wild (7C, JH, 3C)
+0.9618 0.4247 wild
+0.7831 0.1513 3 straight flush (7H, 6H, 5H)
+0.6875 0.2291 4 flush (3C, AC, 6C, 2C)
+0.6875 0.2291 4 flush (2C, AC, 5C, 9C)
+0.6522 0.3664 2 flush + wild (JS, 6D, QD)
+0.6473 0.3714 pair
+0.4166 0.2083 4 straight (5C, 7S, 8C, 6D)
+0.2265 0.1378 discard =========================
+0.3173 0.1121 2 straight flush (10D, KD)
+0.3173 0.1121 2 flush (7C,3D,JC,10D,KD)
+0.3395 0.1160 2 straight flush (QC, 10C)
+0.2759 0.1304 2 straight flush sequence
+0.2644 0.1247 2 straight sequence
+0.25   0.125  4 straight (5H, 7D, 4C, 8C)
+0.2488 0.1241 2 straight sequence (3D, 5D)
+0.2388 0.1208 2 straight flush (4H, 6H)
+0.2117 0.1145 2 straight flush (3S, 2S)
+0.2217 0.1179 2 flush
+0.1981 0.0858 3 flush JD,7D,3D,QS,AC
+2 kind + wild
+2 pair
+
+2 of a kind
+
+4 to a flush
+3 to a flush
+
+
+wild only
+
+
+*/
+
+
+// One pair: C(13,1)*C(4,2)*C(12,3)*C(4,1)^3
+
+// https://www-old.math.gatech.edu/academic/courses/core/math1711/html/perm_comb.html
+// http://www.cwu.edu/~glasbys/POKER.HTM
+// http://natureofcode.com/book/chapter-9-the-evolution-of-code/
+
+// var a = new Hand([new Card('J','C'),new Card('9','S'), new Card('3','S'), new Card('9','H'), new Card('J','S')]); asdf.scoring.totals(a);
+
+// hand: 7D,6S,5D,KC,JH
+// oej.html:559 totals: {"pairs":1,"kind":2,"wkind":2,"flush":3,"straight":4,"royals":2,"wilds":1,"ranks":4}
+// Object {none: 268893840, total: 311875200, three_kind: 23970960, straight: 3472560, two_pair: 12355200…}
+// five_kind: 8640
+// flush: 1137120
+// four_kind: 999360
+// full_house: 973440
+// none: 268893840
+// straight: 3472560
+// straight_flush: 62400
+// three_kind: 23970960
+// total: 311875200 P(52,5)
+// two_pair: 12355200
+// wild_royal: 1680
+// __proto__: Object
+// oej.html:560 classify: null
+
+
+// oej.html:691 hold  0.22651445193462 0.13781589558900484 Object {none: 268893840, total: 311875200, three_kind: 23970960, straight: 3472560, two_pair: 12355200…}
+
+
+// oej.html:691 hold 7D 0.21130052020808324 0.13175670268107242 Object {none: 5207376, total: 5997600, three_kind: 404352, straight: 77208, two_pair: 251856…}
+// oej.html:691 hold 6S 0.21056822729091637 0.13193677470988396 Object {none: 5206296, total: 5997600, three_kind: 404040, straight: 85464, two_pair: 251856…}
+// oej.html:691 hold 7D, 6S 0.16816326530612244 0.11755102040816326 Object {none: 103776, total: 117600, three_kind: 5616, straight: 3408, two_pair: 4464…}
+// oej.html:691 hold 5D 0.21395758303321327 0.13303721488595438 Object {none: 5199696, total: 5997600, three_kind: 403776, straight: 85464, two_pair: 251856…}
+// oej.html:691 hold 7D, 5D 0.24887755102040815 0.12418367346938776 Object {none: 102996, total: 117600, three_kind: 5604, straight: 2484, two_pair: 4464…}
+// oej.html:691 hold 6S, 5D 0.16816326530612244 0.11755102040816326 Object {none: 103776, total: 117600, three_kind: 5616, straight: 3408, two_pair: 4464…}
+// oej.html:691 hold 7D, 6S, 5D 0.1836734693877551 0.11479591836734694 Object {none: 2082, total: 2352, three_kind: 54, straight: 162, two_pair: 54}
+// oej.html:691 hold KC 0.19084033613445378 0.12313325330132052 Object {none: 5259096, total: 5997600, three_kind: 407784, two_pair: 251856, full_house: 17640…}
+// oej.html:691 hold 7D, KC 0.11142857142857143 0.08979591836734693 Object {none: 107040, total: 117600, three_kind: 5760, two_pair: 4464, full_house: 216…}
+// oej.html:691 hold 6S, KC 0.11142857142857143 0.08979591836734693 Object {none: 107040, total: 117600, three_kind: 5760, two_pair: 4464, four_kind: 120…}
+// oej.html:691 hold 7D, 6S, KC 0.0467687074829932 0.0467687074829932 Object {none: 2242, total: 2352, three_kind: 56, two_pair: 54}
+// oej.html:691 hold 5D, KC 0.11142857142857143 0.08979591836734693 Object {none: 107040, total: 117600, three_kind: 5760, two_pair: 4464, four_kind: 120…}
+// oej.html:691 hold 7D, 5D, KC 0.0467687074829932 0.0467687074829932 Object {none: 2242, total: 2352, three_kind: 56, two_pair: 54}
+// oej.html:691 hold 6S, 5D, KC 0.0467687074829932 0.0467687074829932 Object {none: 2242, total: 2352, three_kind: 56, two_pair: 54}
+// oej.html:691 hold 7D, 6S, 5D, KC 0 0 Object {none: 48, total: 48}
+// oej.html:691 hold JH 0.9450740296118447 0.42470588235294116 Object {none: 3450384, total: 5997600, three_kind: 1981008, straight: 290016, four_kind: 133632…}
+// Object {none: 3450384, total: 5997600, three_kind: 1981008, straight: 290016, four_kind: 133632…}
+// five_kind: 1440
+// flush: 73632
+// four_kind: 133632
+// full_house: 58752
+// none: 3450384
+// straight: 290016
+// straight_flush: 8448
+// three_kind: 1981008
+// total: 5997600
+// wild_royal: 288
+// __proto__: Object
+// oej.html:691 hold 7D, JH 0.931530612244898 0.42918367346938774 Object {none: 67128, total: 117600, three_kind: 38256, straight: 6948, four_kind: 2322…}
+// oej.html:691 hold 6S, JH 0.9330102040816326 0.4312755102040816 Object {none: 66882, total: 117600, three_kind: 38178, straight: 7668, four_kind: 2322…}
+// oej.html:691 hold 7D, 6S, JH 0.7585034013605442 0.4421768707482993 Object {none: 1312, total: 2352, three_kind: 662, straight: 336, four_kind: 24…}
+// oej.html:691 hold 5D, JH 0.9425510204081633 0.4340816326530612 Object {none: 66552, total: 117600, three_kind: 38112, straight: 7668, four_kind: 2322…}
+// oej.html:691 hold 7D, 5D, JH 1.3231292517006803 0.4557823129251701 Object {none: 1280, total: 2352, three_kind: 658, straight: 240, four_kind: 24…}
+// oej.html:691 hold 6S, 5D, JH 0.7585034013605442 0.4421768707482993 Object {none: 1312, total: 2352, three_kind: 662, straight: 336, full_house: 18…}
+// oej.html:691 hold 7D, 6S, 5D, JH 0.8958333333333334 0.5416666666666666 Object {none: 22, total: 48, three_kind: 9, straight: 17}
+// oej.html:691 hold KC, JH 0.847295918367347 0.39698979591836736 Object {none: 70914, total: 117600, three_kind: 39114, full_house: 1206, four_kind: 2322…}
+// oej.html:691 hold 7D, KC, JH 0.4931972789115646 0.3197278911564626 Object {none: 1600, total: 2352, three_kind: 710, full_house: 18, four_kind: 24}
+// oej.html:691 hold 6S, KC, JH 0.4931972789115646 0.3197278911564626 Object {none: 1600, total: 2352, three_kind: 710, four_kind: 24, full_house: 18}
+// oej.html:691 hold 7D, 6S, KC, JH 0.20833333333333334 0.20833333333333334 Object {none: 38, total: 48, three_kind: 10}
+// oej.html:691 hold 5D, KC, JH 0.4931972789115646 0.3197278911564626 Object {none: 1600, total: 2352, three_kind: 710, four_kind: 24, full_house: 18}
+// oej.html:691 hold 7D, 5D, KC, JH 0.20833333333333334 0.20833333333333334 Object {none: 38, total: 48, three_kind: 10}
+// oej.html:691 hold 6S, 5D, KC, JH 0.20833333333333334 0.20833333333333334 Object {none: 38, total: 48, three_kind: 10}
+// oej.html:691 hold 7D, 6S, 5D, KC, JH 0 0 Object {none: 1, total: 1}
+// oej.html:701 max 7D, 5D, JH 1.3231292517006803 0.4557823129251701 Object {none: 1280, total: 2352, three_kind: 658, straight: 240, four_kind: 24…}
+
+/**
+
+max win 7D, 7H, 7S 3.0595238095238093 1 Object {three_kind: 1936, total: 2352, four_kind: 276, full_house: 134, five_kind: 6}
+6=3*2
+276=3*2*(48-2)
+134=
+*/
+
+</script>
+</body>
+</html>
