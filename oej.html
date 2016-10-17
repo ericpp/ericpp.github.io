@@ -269,6 +269,23 @@ Hand.prototype.getHolds = function (mask) {
 	return cards;
 };
 
+Hand.prototype.isComplete = function () {
+	return this.cards.length >= this.maxcards;
+};
+
+Hand.prototype.hasCard = function (card) {
+	return (this.cards.indexOf(card) !== -1);
+};
+
+Hand.prototype.addCard = function (card) {
+	if (this.cards.length >= this.maxcards || this.hasCard(card)) {
+		return false;
+	}
+
+	this.cards.push(card);
+	return true;
+};
+
 Hand.prototype.isValid = function () {
 	return (
 		this.cards.length == 5 &&
@@ -988,13 +1005,8 @@ BestHolds.prototype.fastbh = function (holds) {
 	for (var nh = 0; nh < this.numhands; nh++) {
 		var hand = new Hand(holds.slice());
 
-		for (var c = hand.cards.length; c < this.numcards; ) {
-			var card = deck.dealCard();
-
-			if (hand.cards.indexOf(card) == -1) {
-				hand.cards.push(card);
-				c++;
-			}
+		while (!hand.isComplete()) {
+			hand.addCard(deck.dealCard());
 		}
 
 		var cls = this.scoring.classify(hand) || 'none';
