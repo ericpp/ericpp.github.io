@@ -27,15 +27,29 @@
 	</tr>
 	<tr>
 		<td colspan="5">
-			<button id="draw">Draw</button>
-			<span id="credits"></span>
-			<span id="result"></span>
+			Game:
+			<select id="game" name="game">
+				<option value="job">Jacks or Better</option>
+				<option value="oej">One-eyed Jacks</option>
+				<option value="deuce">Deuces Wild</option>
+			</select>
+			&nbsp;
+			Score: <span id="credits"></span>
+			&nbsp;
+			Result: <span id="result"></span>
+			&nbsp;
+			Best Holds:
+			<span id="bestholds"></span>
 		</td>
 	</tr>
 	<tr>
 		<td colspan="5">
-			<button id="besthold">Best Holds</button>
-			<span id="besthold_text"></span>
+			<button id="draw">Draw</button>
+		</td>
+	</tr>
+	<tr>
+		<td colspan="5">
+			<button id="recalc_holds">Recalculate Holds</button>
 		</td>
 	</tr>
 </table>
@@ -44,7 +58,8 @@
 	<thead>
 		<th>Cards</th>
 		<th>Score</th>
-		<th>Prob</th>
+		<th>Hands</th>
+		<th>Pct</th>
 		<th>Target</th>
 		<th>Totals</th>
 	</thead>
@@ -316,141 +331,123 @@ Hand.prototype.isValid = function () {
 };
 
 function Scoring() {
-	// this.deck = deck;
-	this.paytable_job = {
-		'natural_royal':    16 * 250,
-		'straight_flush':   5 * 50,
-		'four_kind':        5 * 25,
-		'full_house':       5 * 6, // 5 * 8,
-		'flush':            5 * 5,
-		'straight':         5 * 4,
-		'three_kind':       5 * 3,
-		'two_pair':         5 * 2,
-		'jacks_better':     5 * 1,
-	};
-
-	this.paytable_oej = {
-		//'natural_royal': 800,
-		//'wild_royal': 200,
-		'natural_royal':    800, // 250, // 4000 - 5 CRED
-		'wild_royal':       150,
-		'five_kind':        75,
-		//'straight_flush': 50,
-		'straight_flush':   45,
-		'four_kind':        15,
-		'full_house':       5,
-		'flush':            3,
-		'straight':         2,
-		'three_kind':       1,
-		'two_pair':         1,
-	};
-
-	this.paytable_deuce = {
-		'natural_royal':    4000,
-		'four_deuces':      1000,
-		'deuce_royal':      125,
-		'five_kind':        80,
-		'straight_flush':   50,
-		'four_kind':        20,
-		'full_house':       20,
-		'flush':            15,
-		'straight':         10,
-		'three_kind':       5,
-	};
-
-	this.multipliers_job = {
-		'natural_royal':    2,
-		'straight_flush':   2,
-		'four_kind':        2,
-		'full_house':       12,
-		'flush':            11,
-		'straight':         7,
-		'three_kind':       4,
-		'two_pair':         3,
-		'jacks_better':     2,
-	};
-
-	// this.paytable = this.paytable_oej;
-	// this.classify = this.classify_oej;
-	// this.iswild = this.iswild_oej;
-
-	this.paytable = this.paytable_job;
-	this.classify = this.classify_job;
-	this.iswild = this.iswild_job;
-	this.multipliers = this.multipliers_job;
-
 	this.rankorder = [ "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A" ];
+	this.rules = new JOBRules();
 }
-// var a = new Hand([new Card('J','S'),new Card('6','H'), new Card('7','C'), new Card('5','H'), new Card('9','D')]); asdf.scoring.totals(a);
-// var a = new Hand([new Card('J','S'),new Card('A','H'), new Card('K','C'), new Card('Q','H'), new Card('J','D')]); asdf.scoring.totals(a);
-// var a = new Hand([new Card('K','D'),new Card('A','S'), new Card('5','H'), new Card('5','D'), new Card('A','D')]); asdf.scoring.totals(a);
-// var a = new Hand([new Card('J','S'),new Card('Q','D'), new Card('3','D'), new Card('8','C'), new Card('3','H')]); asdf.scoring.totals(a);
-// var a = new Hand([new Card('2','D'),new Card('10','C'), new Card('3','H'), new Card('7','C'), new Card('J','S')]); asdf.scoring.totals(a);
-// var a = new Hand([new Card('9','D'),new Card('J','D'), new Card('4','S'), new Card('9','H'), new Card('J','H')]); asdf.scoring.totals(a);
-// var a = new Hand([new Card('J','C'),new Card('9','S'), new Card('3','S'), new Card('9','H'), new Card('J','S')]); asdf.scoring.totals(a);
+
+Scoring.prototype.setGame = function (game) {
+	var rules;
+
+	if (game == 'job') {
+		rules = new JOBRules();
+	}
+	else if (game == 'oej') {
+		rules = new OEJRules();
+	}
+	else if (game == 'deuce') {
+		rules = new DeuceRules();
+	}
+
+	this.rules = rules;
+}
+
+Scoring.prototype.classify = function (hand) {
+	return this.rules.classify(this.totals(hand));
+}
+
+Scoring.prototype.multiplier = function (cls) {
+	return this.rules.multiplier(cls);
+}
+
+Scoring.prototype.payout = function (cls) {
+	return this.rules.payout(cls);
+}
 
 Scoring.prototype.totals = function (hand) {
-	var options = { pairs: 0, kind: 0, flush: 0, nstraight: 0, wstraight: 0, royals: 0, wilds: 0, ranks: 0, suits: 0, job: 0 };
+	var totals = {
+		pairs: 0,     // pairs
+		kind: 0,      // same rank
+		flush: 0,     // same suit
+		nstraight: 0, // sequential cards w/o wilds
+		wstraight: 0, // sequential cards w/ wilds
+		royals: 0,    // royal suits
+		wilds: 0,     // wild cards
+		ranks: 0,     // distinct ranks
+		suits: 0,     // distinct suits
+		job: 0,       // jacks or better
+	};
+
 	var pair1, pair2;
 
-	options.ranks = hand.cards.length;
-	options.suits = hand.cards.length;
+	totals.ranks = hand.cards.length;
+	totals.suits = hand.cards.length;
 
+	// figure out what the hand contains by looping through each card
 	for (var a = 0; a < hand.cards.length; a++) {
 		var kind = 0;
 		var flush = 0;
 		var distinctrank = true;
 		var distinctsuit = true;
-		var wilda = this.iswild(hand.cards[a]);
 
+		var wilda = this.rules.iswild(hand.cards[a]);
+
+		// compare the current card with the rest of the cards in the hand
 		for (var b = 0; b < hand.cards.length; b++) {
-			var wildb = this.iswild(hand.cards[b]);
+			var wildb = this.rules.iswild(hand.cards[b]);
 
-			// if (wildb || hand.cards[a].suit == hand.cards[b].suit) {
-			if (!wildb && hand.cards[a].rank == hand.cards[b].rank) {
+			// card A has same rank as card B and card B is not wild
+			if (hand.cards[a].rank == hand.cards[b].rank && !wildb) {
 				kind++;
 			}
 
-			// if (hand.cards[a].suit == hand.cards[b].suit) {
-			// if (wildb || hand.cards[a].suit == hand.cards[b].suit) {
-			if (!wildb && hand.cards[a].suit == hand.cards[b].suit) {
+			// card A has same suit as card B and card B is not wild
+			if (hand.cards[a].suit == hand.cards[b].suit && !wildb) {
 				flush++;
 			}
 
+			// card A's rank is not the only occurrence in the hand
 			if (a < b && hand.cards[a].rank == hand.cards[b].rank && !wildb) {
 				distinctrank = false;
 			}
 
+			// card A's suit is not the only occurrence in the hand
 			if (a < b && hand.cards[a].suit == hand.cards[b].suit && !wildb) {
 				distinctsuit = false;
 			}
 		}
 
-		if (kind > options.kind) {
-			options.kind = kind;
+		// preserve max kind in totals
+		if (kind > totals.kind) {
+			totals.kind = kind;
 		}
 
-		if (flush > options.flush) {
-			options.flush = flush;
+		// preserve max flush in totals
+		if (flush > totals.flush) {
+			totals.flush = flush;
 		}
 
+		// decrease distinct ranks total if not distinct
 		if (!distinctrank || wilda) {
-			options.ranks--;
+			totals.ranks--;
 		}
 
+		// decrease distinct suits total if not distinct
 		if (!distinctsuit || wilda) {
-			options.suits--;
+			totals.suits--;
 		}
 
+		// royal if rank is A/J/Q/K and not wild
 		if (!wilda && (hand.cards[a].rank == "A" || hand.cards[a].rank == "J" || hand.cards[a].rank == "Q" || hand.cards[a].rank == "K")) {
-			options.royals++;
+			totals.royals++;
 		}
 
+		// wild card
 		if (wilda) {
-			options.wilds++;
+			totals.wilds++;
 		}
 
-		if (!wilda && kind >= 2) {
+		// track the pair ranks (maximum of two)
+		if (kind >= 2 && !wilda) {
 			if (!pair1) {
 				pair1 = hand.cards[a].rank;
 			}
@@ -459,42 +456,46 @@ Scoring.prototype.totals = function (hand) {
 			}
 		}
 
+		// jacks or better if two cards with royal suit
 		if (kind >= 2 && (hand.cards[a].rank == "A" || hand.cards[a].rank == "J" || hand.cards[a].rank == "Q" || hand.cards[a].rank == "K")) {
-			options.job++;
+			totals.job++;
 		}
 	}
 
+	// increment if we have one pair
 	if (pair1) {
-		options.pairs++;
+		totals.pairs++;
 	}
 
+	// increment if we have another pair
 	if (pair2) {
-		options.pairs++;
+		totals.pairs++;
 	}
 
-	if (options.wilds > 0) {
-		options.kind += options.wilds;
-		options.flush += options.wilds;
-		options.royals += options.wilds;
+	// increase totals if wild card
+	if (totals.wilds > 0) {
+		totals.kind += totals.wilds;
+		totals.flush += totals.wilds;
+		totals.royals += totals.wilds;
 
-		if (options.pairs < 2) {
-			options.pairs += options.wilds;
+		if (totals.pairs < 2) {
+			totals.pairs += totals.wilds;
 		}
 	}
 
-
+	// check if the hand has any natural or wild straights
 	var nstraight = 0;
 	var wstraight = 0;
-	var wildsleft = options.wilds;
+	var wildsleft = totals.wilds;
 
 	for (var a = 0; a < this.rankorder.length; a++) {
 		var nfound = false;
 		var wfound = false;
 
 		for (var b = 0; b < hand.cards.length; b++) {
-			var wildb = this.iswild(hand.cards[b]);
+			var wildb = this.rules.iswild(hand.cards[b]);
 
-			if (!wildb && this.rankorder[a] == hand.cards[b].rank) {
+			if (this.rankorder[a] == hand.cards[b].rank && !wildb) {
 				wfound = true;
 			}
 
@@ -503,9 +504,16 @@ Scoring.prototype.totals = function (hand) {
 			}
 		}
 
+		// use one of the wilds if straight not found
+		if (!wfound && wstraight > 0 && wildsleft > 0) {
+			wfound = true;
+			wildsleft--;
+		}
+
+		// natural straight
 		if (!nfound) {
-			if (nstraight > options.nstraight) {
-				options.nstraight = nstraight;
+			if (nstraight > totals.nstraight) {
+				totals.nstraight = nstraight;
 			}
 			nstraight = 0;
 		}
@@ -513,83 +521,48 @@ Scoring.prototype.totals = function (hand) {
 			nstraight++;
 		}
 
-		if (!wfound && wstraight > 0 && wildsleft > 0) {
-			wfound = true;
-			wildsleft--;
-		}
-
+		// wild straight
 		if (!wfound) {
-			if (wstraight > options.wstraight) {
-				options.wstraight = wstraight;
+			if (wstraight > totals.wstraight) {
+				totals.wstraight = wstraight;
 			}
 			wstraight = 0;
-			wildsleft = options.wilds;
+			wildsleft = totals.wilds;
 		}
 		else {
 			wstraight++;
 		}
 	}
 
-	if (nstraight > options.nstraight) {
-		options.nstraight = nstraight;
+	// add natural straight count to totals
+	if (nstraight > totals.nstraight) {
+		totals.nstraight = nstraight;
 	}
 
-	if (wstraight + wildsleft > options.wstraight) {
-		options.wstraight = wstraight + wildsleft;
+	// add wild straight count to totals
+	if (wstraight + wildsleft > totals.wstraight) {
+		totals.wstraight = wstraight + wildsleft;
 	}
 
-	return options;
+	return totals;
 };
 
-Scoring.prototype.iswild_job = function (card) {
-	return false;
-};
+function OEJRules() {
+	this.paytable = {
+		'natural_royal':    4000,
+		'wild_royal':       5 * 150,
+		'five_kind':        5 * 75,
+		'straight_flush':   5 * 45,
+		'four_kind':        5 * 15,
+		'full_house':       5 * 5,
+		'flush':            5 * 3,
+		'straight':         5 * 2,
+		'three_kind':       5 * 1,
+		'two_pair':         5 * 1,
+	};
+}
 
-Scoring.prototype.iswild_oej = function (card) {
-	return card.rank == "J" && (card.suit == "H" || card.suit == "S");
-};
-
-Scoring.prototype.iswild_deuce = function (card) {
-	return card.rank == "2";
-};
-
-Scoring.prototype.classify_job = function (hand) {
-	var totals = this.totals(hand);
-	var cls = null;
-
-	if (totals.royals == 4 && totals.nstraight == 5 && totals.flush == 5) {
-		cls = 'natural_royal';
-	}
-	else if (totals.nstraight == 5 && totals.flush == 5) {
-		cls = 'straight_flush';
-	}
-	else if (totals.kind == 4) {
-		cls = 'four_kind';
-	}
-	else if (totals.ranks == 2) {
-		cls = 'full_house';
-	}
-	else if (totals.flush == 5) {
-		cls = 'flush';
-	}
-	else if (totals.nstraight == 5) {
-		cls = 'straight';
-	}
-	else if (totals.kind == 3) {
-		cls = 'three_kind';
-	}
-	else if (totals.pairs == 2) {
-		cls = 'two_pair';
-	}
-	else if (totals.job > 0) {
-		cls = 'jacks_better';
-	}
-
-	return cls;
-};
-
-Scoring.prototype.classify_oej = function (hand) {
-	var totals = this.totals(hand);
+OEJRules.prototype.classify = function (totals) {
 	var cls = null;
 
 	if (totals.royals == 4 && totals.nstraight == 5 && totals.flush == 5) {
@@ -626,8 +599,106 @@ Scoring.prototype.classify_oej = function (hand) {
 	return cls;
 };
 
-Scoring.prototype.classify_deuce = function (hand) {
-	var totals = this.totals(hand);
+OEJRules.prototype.iswild = function (card) {
+	return card.rank == "J" && (card.suit == "H" || card.suit == "S");
+};
+
+OEJRules.prototype.multiplier = function (cls) {
+	return 1;
+};
+
+OEJRules.prototype.payout = function (cls) {
+	return this.paytable[cls] || 0;
+};
+
+function JOBRules() {
+	this.paytable = {
+		'natural_royal':    16 * 250,
+		'straight_flush':   5 * 50,
+		'four_kind':        5 * 25,
+		'full_house':       5 * 6, // 5 * 8,
+		'flush':            5 * 5,
+		'straight':         5 * 4,
+		'three_kind':       5 * 3,
+		'two_pair':         5 * 2,
+		'jacks_better':     5 * 1,
+	};
+
+	this.multipliers = {
+		'natural_royal':    2,
+		'straight_flush':   2,
+		'four_kind':        2,
+		'full_house':       12,
+		'flush':            11,
+		'straight':         7,
+		'three_kind':       4,
+		'two_pair':         3,
+		'jacks_better':     2,
+	};
+}
+
+JOBRules.prototype.classify = function (totals) {
+	var cls = null;
+
+	if (totals.royals == 4 && totals.nstraight == 5 && totals.flush == 5) {
+		cls = 'natural_royal';
+	}
+	else if (totals.nstraight == 5 && totals.flush == 5) {
+		cls = 'straight_flush';
+	}
+	else if (totals.kind == 4) {
+		cls = 'four_kind';
+	}
+	else if (totals.ranks == 2) {
+		cls = 'full_house';
+	}
+	else if (totals.flush == 5) {
+		cls = 'flush';
+	}
+	else if (totals.nstraight == 5) {
+		cls = 'straight';
+	}
+	else if (totals.kind == 3) {
+		cls = 'three_kind';
+	}
+	else if (totals.pairs == 2) {
+		cls = 'two_pair';
+	}
+	else if (totals.job > 0) {
+		cls = 'jacks_better';
+	}
+
+	return cls;
+};
+
+JOBRules.prototype.iswild = function (card) {
+	return false;
+};
+
+JOBRules.prototype.multiplier = function (cls) {
+	return 1; // this.multipliers[cls];
+};
+
+JOBRules.prototype.payout = function (cls) {
+	return this.paytable[cls] || 0;
+};
+
+function DeuceRules() {
+	this.paytable = {
+		'natural_royal':    4000,
+		'four_deuces':      1000,
+		'deuce_royal':      125,
+		'five_kind':        80,
+		'straight_flush':   50,
+		'four_kind':        20,
+		'full_house':       20,
+		'flush':            15,
+		'straight':         10,
+		'three_kind':       5,
+	};
+}
+
+DeuceRules.prototype.classify = function (totals) {
 	var cls = null;
 
 	if (totals.royals == 4 && totals.nstraight == 5 && totals.flush == 5) {
@@ -664,119 +735,21 @@ Scoring.prototype.classify_deuce = function (hand) {
 	return cls;
 };
 
-Scoring.prototype.payout = function (hand) {
-	var cls = this.classify(hand);
-	var pay = 0;
-
-	if (this.paytable[cls]) {
-		pay = this.paytable[cls];
-	}
-
-	return pay;
+DeuceRules.prototype.iswild = function (card) {
+	return card.rank == "2";
 };
 
-
-Scoring.prototype.probability = function () {
-	var cls = this.classify();
-
-if (cls.pairs == 2) {
-	cls.two_pair_prob = 1;
-}
-else if (cls.pairs == 1) {
-	var cards = this.ncr(50, 3);
-
-	var freq = this.ncr(12, 1); // 12 ways to pick a rank
-	freq *= this.ncr(4, 2); // 6 ways to pick a pair
-	freq *= this.ncr(2, 1); // 2 ways to pick a wild
-
-	freq *= this.ncr(11, 1); // 11 ways to pick a rank
-	freq *= this.ncr(4, 1); // 4 ways to pick the last card
-
-	cls.two_pair_prob = freq / cards;
-
-}
-else {
-	 // five ways for first pair and three ways for second pair
-	// cls.two_pair_prob = 5 * 1 * (5/51) * 3 * 1 * (5/49);
-	var cards = this.ncr(52, 5);
-
-	var freq = this.ncr(13, 2); // 78 ways to pick two ranks
-	freq *= this.ncr(4, 2); // 6 ways to pick a pair
-	freq *= this.ncr(4, 2); // 6 ways to pick a pair
-	freq *= this.ncr(2, 1); // 2 ways to pick a wild
-
-	freq *= this.ncr(11, 1); // 11 ways to pick the last rank
-	freq *= this.ncr(4, 1); // 4 ways to pick the last card
-
-	cls.two_pair_prob = freq / cards;
-}
-
-if (cls.kind <= 1) {
-	var cards = this.ncr(52, 5);
-
-	// cls.three_kind_prob = (5-cls.kind) * Math.pow((4-cls.kind)/(52-cls.kind), 3-cls.kind);
-	var three_freq = this.ncr(13, 1); // 13 ways to pick a rank
-	three_freq *= this.ncr(4, 3); // 4 ways to pick three cards in a rank
-	three_freq *= this.ncr(2, 1); // 2 ways to pick a wild
-
-	three_freq *= this.ncr(12, 2); // ways to pick two ranks
-	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
-	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
-
-	var four_freq = this.ncr(13, 1); // 13 ways to pick a rank
-	four_freq *= this.ncr(4, 4); // 4 ways to pick three cards in a rank
-	four_freq *= this.ncr(2, 1); // 2 ways to pick a wild
-
-	four_freq *= this.ncr(12, 1); // ways to pick two ranks
-	four_freq *= this.ncr(4, 1);  // ways to pick card from rank
-
-	cls.three_kind_prob = three_freq / cards;
-	cls.four_kind_prob = four_freq / cards;
-}
-else {
-	var cards = this.ncr(47, 5-cls.kind);
-
-	var three_freq = this.ncr(4-cls.kind, 3-cls.kind); // 4 ways to pick three cards in a rank
-
-	three_freq *= this.ncr(12, 2); // ways to pick two ranks
-	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
-	three_freq *= this.ncr(4, 1);  // ways to pick card from rank
-	three_freq *= this.ncr(2, 1); // 2 ways to pick a wild
-
-	var four_freq = this.ncr(4-cls.kind, 4-cls.kind); // 4 ways to pick three cards in a rank
-
-	four_freq *= this.ncr(12, 1); // ways to pick two ranks
-	four_freq *= this.ncr(4, 1);  // ways to pick card from rank
-
-	cls.three_kind_prob = three_freq / cards;
-	cls.four_kind_prob = four_freq / cards;
-}
-
-	return cls;
+DeuceRules.prototype.multiplier = function (cls) {
+	return 1;
 };
 
-
-Scoring.prototype.factorial = function (num) {
-	var result = num;
-
-	if (num == 0) {
-		result = 1;
-	}
-
-	while (num > 1) {
-		result *= --num;
-	}
-
-	return result;
-};
-
-Scoring.prototype.ncr = function (n, k) {
-	return (this.factorial(n)) / (this.factorial(k) * this.factorial(n - k));
+DeuceRules.prototype.payout = function (cls) {
+	return this.paytable[cls] || 0;
 };
 
 
 
-function Test() {
+function Application() {
 	this.deck = new Deck();
 	this.hand = new Hand();
 	this.scoring = new Scoring();
@@ -787,47 +760,44 @@ function Test() {
 	this.bet = 5;
 	this.multiplier = 1;
 
-this.initialize = function () {
-	var container = document.getElementById("cards");
-	var tds = container.getElementsByTagName("td");
-	var self = this;
+	this.initialize = function () {
+		var container = document.getElementById("cards");
+		var tds = container.getElementsByTagName("td");
+		var self = this;
 
-	this.test();
-	this.shuffle();
-	this.deal();
+		var game = document.getElementById('game');
 
-	for (var idx = 0; idx < tds.length; idx++) {
-		tds[idx].addEventListener('click', function () {
-			this.className = (this.className == 'held' ? '' : 'held');
-			var pos = parseInt(this.getAttribute('data-card'));
-			self.hand.hold(pos);
+		this.changeGame(game.options[game.selectedIndex].value);
+
+		for (var idx = 0; idx < tds.length; idx++) {
+			tds[idx].addEventListener('click', function () {
+				this.className = (this.className == 'held' ? '' : 'held');
+				var pos = parseInt(this.getAttribute('data-card'));
+				self.hand.hold(pos);
+			});
+		}
+
+		document.getElementById("recalc_holds").addEventListener('click', function () {
+			self.generateBestHolds();
 		});
-	}
 
+		document.getElementById('game').addEventListener('change', function () {
+			var game = document.getElementById('game');
+			self.changeGame(game.options[game.selectedIndex].value);
+		});
 
-	document.getElementById("besthold").addEventListener('click', function () {
-		var txt = document.getElementById("besthold_text");
-		txt.innerHTML = 'Calculating...';
+		document.getElementById("draw").addEventListener('click', function () {
+			self.deal();
+		});
+	};
 
-		setTimeout(function () {
-			var holds = self.bestHolds.get(self.hand, self.multiplier);
-
-			if (holds.best.score > 0.2265 && holds.best.prob > 0.1378) {
-				txt.innerHTML = (new Hand(holds.best.cards)).toString() + ' ' + holds.best.score + ' ' + holds.best.prob;
-			}
-			else {
-				txt.innerHTML = "discard";
-			}
-
-			self.updateHoldsTable(holds.possible);
-
-		}, 10);
-	});
-
-	document.getElementById("draw").addEventListener('click', function () {
-		self.deal();
-	});
-};
+	this.changeGame = function (game) {
+		this.scoring.setGame(game);
+		this.credits = 4000;
+		this.redraw = false;
+		this.shuffle();
+		this.deal();
+	};
 
 
 this.test = function () {
@@ -945,33 +915,10 @@ this.test = function () {
 			this.hand.cards = this.deck.deal(this.numcards);
 			this.hand.held = [];
 			this.credits = this.credits - this.bet;
-
-
-			var txt = document.getElementById("besthold_text");
-			txt.innerHTML = 'Calculating...';
-
-			setTimeout(function () {
-				var holds = self.bestHolds.get(self.hand);
-				txt.innerHTML = (new Hand(holds.best.cards)).toString() + ' ' + holds.best.score + ' ' + holds.best.prob;
-				self.updateHoldsTable(holds.possible);
-			}, 0);
+			this.generateBestHolds();
 		}
 		else {
 			this.deck.dealInto(this.hand);
-		// 	for (var idx = 0; idx < this.hand.cards.length; idx++) {
-		// 		if (this.hand.held.indexOf(idx) != -1) {
-		// 			continue; // held
-		// 		}
-
-		// 		var card = this.deck.dealCard();
-
-		// 		while (this.hand.cards.indexOf(card) != -1) {
-		// 			console.log('redeal:', card);
-		// 			card = this.deck.dealCard();
-		// 		}
-
-		// 		this.hand.cards[idx] = card;
-		// 	}
 		}
 
 console.log("hand: " + this.hand.cards);
@@ -990,20 +937,21 @@ console.log("classify: " + JSON.stringify(this.scoring.classify(this.hand)));
 		var cls = this.scoring.classify(this.hand);
 		var tot = this.scoring.totals(this.hand);
 
-		result.innerHTML = cls + '&nbsp;' + JSON.stringify(tot);
+		result.innerHTML = ''; // cls + '&nbsp;' + JSON.stringify(tot);
 
 		if (this.redraw && cls) {
-			this.credits += this.scoring.paytable[cls] * this.multiplier;
+			this.credits += this.scoring.payout(cls) * this.multiplier;
 		}
 
 		if (this.redraw) {
+			result.innerHTML = cls || 'lose';
+
 			this.multiplier = 1;
 
-			if (cls && this.scoring.multipliers[cls]) {
-				this.multiplier = this.scoring.multipliers[cls];
+			if (cls && this.scoring.multiplier(cls)) {
+				this.multiplier = this.scoring.multiplier(cls);
 			}
 		}
-console.log("multiplier: " + this.multiplier);
 
 		this.redraw = !this.redraw;
 
@@ -1016,15 +964,29 @@ console.log("multiplier: " + this.multiplier);
 		return this.hand;
 	};
 
+	this.generateBestHolds = function () {
+		var self = this;
+
+		var txt = document.getElementById("bestholds");
+		txt.innerHTML = 'Calculating...';
+
+		setTimeout(function () {
+			var holds = self.bestHolds.get(self.hand);
+			txt.innerHTML = (new Hand(holds.best.cards)).toString();
+			self.updateHoldsTable(holds.possible);
+		}, 0);
+	}
+
 	this.updateHoldsTable = function (holds) {
 		var tbody = document.getElementById("holdsTable").getElementsByTagName("tbody")[0];
-		var paytable = this.scoring.paytable;
 		var html = '';
 
 		holds = holds.sort(function (a, b) {
 			var cmp = (a.score < b.score) ? 1 : (a.score == b.score ? 0 : -1);
 			return cmp;
 		});
+
+		var self = this;
 
 		holds.forEach(function (hold) {
 			var target = null;
@@ -1034,8 +996,8 @@ console.log("multiplier: " + this.multiplier);
 				if (outcome != "total" && outcome != "none") {
 					outcomes.push({
 						outcome: outcome,
-						prob: Math.floor(10000.0 * hold.totals[outcome] / hold.totals["total"]),
-						score: hold.totals[outcome] * (paytable[outcome] + 1),
+						hands: hold.totals[outcome],
+						score: hold.totals[outcome] * self.scoring.payout(outcome),
 					});
 				}
 			}
@@ -1044,16 +1006,17 @@ console.log("multiplier: " + this.multiplier);
 				return (a.score < b.score ? 1 : (a.score == b.score ? 0 : -1));
 			});
 
-			var probs = outcomes.map(function (out) {
-				return  (out.prob / 100.0) + '% ' + out.outcome;
+			var hands = outcomes.map(function (out) {
+				return out.hands + ' ' + out.outcome;
 			}).join(', ');
 
 			html += '<tr>';
 			html += '<td>' + (new Hand(hold.cards)) + '</td>';
 			html += '<td>' + hold.score + '</td>';
-			html += '<td>' + hold.prob + '</td>';
-			html += '<td>' + (outcomes.length ? (outcomes[0].prob / 100) + '% ' + outcomes[0].outcome : '') + '</td>';
-			html += '<td>' + probs + '</td>';
+			html += '<td>' + hold.hands + '</td>';
+			html += '<td>' + (100.0 * hold.hands / self.bestHolds.numhands) + '%</td>';
+			html += '<td>' + (outcomes.length ? outcomes[0].outcome : '') + '</td>';
+			html += '<td>' + hands + '</td>';
 			html += '</tr>';
 		});
 
@@ -1064,7 +1027,7 @@ console.log("multiplier: " + this.multiplier);
 
 function BestHolds(scoring, verbose, numhands) {
 	this.scoring = scoring;
-	this.numhands = numhands || 5000;
+	this.numhands = numhands || 10000;
 	this.numcards = 5;
 	this.verbose = verbose;
 }
@@ -1075,12 +1038,12 @@ BestHolds.prototype.get = function (hand, multiplier) {
 	var perms = Math.pow(2, this.numcards);
 
 	var max_prob_score = 0.0;
-	var max_prob_prob = 0.0
+	var max_prob_hands = 0.0
 	var max_prob_cards = [];
 	var max_prob_totals = null;
 
 	var discard_score = 0.0;
-	var discard_prob = 0.0;
+	var discard_hands = 0.0;
 
 	var result = {};
 	result.possible = [];
@@ -1097,30 +1060,27 @@ BestHolds.prototype.get = function (hand, multiplier) {
 
 		var totals = this.fastbh(cards);
 		var prob_score = 0.0
-		var prob_prob = 0.0;
+		var prob_hands = 0.0;
 
 		for (var prop in totals) {
 			if (!totals.hasOwnProperty(prop) || prop == 'none' || prop == 'total') {
 				continue;
 			}
 
-			prob_score += this.scoring.paytable[prop] * totals[prop] * multiplier;
-			prob_prob += totals[prop];
+			prob_score += totals[prop] * this.scoring.payout(prop) * multiplier;
+			prob_hands += totals[prop];
 		}
-
-		prob_score = prob_score / totals['total'];
-		prob_prob = prob_prob / totals['total'];
 
 		if (p == 0) {
 			discard_score = prob_score;
-			discard_prob = prob_prob;
+			discard_hands = prob_hands;
 		}
 
 		// if (prob_score > max_prob_score && prob_score > 0.2265 && prob_prob > 0.1378) {
-		if (prob_score > max_prob_score && prob_score > discard_score && prob_prob > discard_prob) {
+		if (prob_score > max_prob_score && prob_score > discard_score && prob_hands > discard_hands) {
 			// if (prob_prob > max_prob_prob) {
 			max_prob_score = prob_score;
-			max_prob_prob = prob_prob;
+			max_prob_hands = prob_hands;
 			max_prob_cards = cards;
 			max_prob_totals = totals;
 		}
@@ -1132,7 +1092,7 @@ BestHolds.prototype.get = function (hand, multiplier) {
 		result.possible.push({
 			'cards': cards,
 			'score': prob_score,
-			'prob': prob_prob,
+			'hands': prob_hands,
 			'totals': totals,
 		});
 	}
@@ -1150,7 +1110,7 @@ BestHolds.prototype.get = function (hand, multiplier) {
 	result.best = {
 		'cards': max_prob_cards,
 		'score': max_prob_score,
-		'prob': max_prob_prob,
+		'hands': max_prob_hands,
 		'totals': max_prob_totals,
 	};
 
@@ -1463,7 +1423,7 @@ Strategy.prototype.deal = function () {
 	var tot = this.scoring.totals(this.hand);
 
 	if (this.redraw && cls) {
-		this.credits += this.scoring.paytable[cls];
+		this.credits += this.scoring.payout(cls);
 	}
 
 	if (this.redraw) {
@@ -1509,11 +1469,11 @@ Strategy.prototype.run = function (times) {
 var strat = new Strategy();
 var gen = new Genetic();
 
-var asdf;
+var app;
 
 window.addEventListener("load", function () {
-	asdf = new Test();
-	asdf.initialize();
+	app = new Application();
+	app.initialize();
 });
 
 // JC,JH,JS,7C,10D
